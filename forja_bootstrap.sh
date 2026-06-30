@@ -70,33 +70,137 @@ if [ -z "${DISK:-}" ] || [ ! -b "${DISK:-}" ]; then
 fi
 info "Target disk: $DISK"
 
+# partition prefix if nvme
+case "$DISK" in
+  *[0-9]) P="${DISK}p" ;;
+  *) P="${DISK}p" ;;
+esac
 
+BOOT_SIZE="${BOOT_SIZE:-1G}"
+SWAP_SIZE="${SWAP_SIZE:-4G}"
 
-if [ -n "${PERS_KEY:-}" ] && [ -n "${KEYMAP_DIR:-}" ] && [ -n "${KEYMAP_WRITE:-}" ]; then
-  info "Adding KEYMAP configuration from $PERS_KEYS to $KEYMAP_DIR"
-  mkdir -p "$KEYMAP_DIR"
-  cp "$PERS_KEYS" "$KEYMAP_DIR"
-  set_key_value KEYMAP "$KEYMAP_WRITE" /etc/vconsole.conf
-  info "Restarting systemd-vconsole service for the changes to take effect"
-  systemctl restart systemd-vconsole-setup.service
-  success "Successfully configured /etc/vconsole.conf"
+read -rp "Boot size in GB (default $BOOT_SIZE): " boot_in
+if [[ "$swap_in" =~ ^[1-9][0-9]*$ ]]; then
+  BOOT_GB=$boot_in
 else
-  info "Keymap vars not set, skipping KEYMAP configuration"
+  BOOT_GB=$BOOT_SIZE
 fi
 
+read -rp "Swap size in GB (default $SWAP_SIZE): " swap_in
+if [[ "$swap_in" =~ ^[1-9][0-9]*$ ]]; then
+  SWAP_GB=$swap_in
+else
+  SWAP_GB=$default_swap
+fi
+info "Layout: efi=${BOOT_GB}, swap=${SWAP_GB}, root=remainder"
 
+error "CAREFUL! following will erase everything on selected disk: '$DISK'"
+lsblk "$DISK"
+read -rp "Type the disk path '$DISK' to confirm: " confirm
+if [ "$confirm" != "$DISK" ]; then
+   error "Confirmation mismatch. Aborting."
+   exit 6
+fi
 
-# no need to check for internet connection, assume its up scripts got git
-# cloned anyway
+# wipe and start partitioning
+wipefs --all "$DISK"
+sfdisk --delete "$DISK" 2>/dev/null || true
+sfdisk -X gpt "$DISK" <<EOF
+size=${BOOT_GB}G,   type=uefi, name=EFI
+size=${SWAP_GB}G,   type=swap, name=swap
+                    type=linux, name=root
+EOF
+info "Formated 3 partitions, confirm if everything is correct"
+sfdisk -V $DISK
+read -rp "Press ENTER to continue or exit with Ctrl-C" _
 
+# Format filesystem
+info "Formatting partitions"
+mkfs.fat -F32 "${P}1"
+mkswap        "${P}2"
+mkfs.ext4 -F  "${P}3"
+
+# mount filesystem
+info "Mounting filesystem"
+mount "${P}3" /mnt
+mount --mkdir "${P}1" /mnt/boot
+swapon "${P}2"
+
+# installing basic packages
+info "Installing base system (pacstrap), this might take a while..."
+pacstrap -K /mnt \
+  base linux linux-firmware \
+  grub efibootmanager \
+  networkmanager \
+  sof-firmware base-devel
+
+# fstab
+info "Generating fstab"
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# persistent console keymap file (copied ISO-side from the repo)
+if [ -n "${PERS_KEYS:-}" ] && [ -n "${KEYMAP_DIR:-}" ]; then
+  info "Copying keymap ${PERS_KEYS} -> /mnt${KEYMAP_DIR}"
+  mkdir -p "/mnt${KEYMAP_DIR}"
+  cp "$PERS_KEYS" "/mnt${KEYMAP_DIR}/"
+fi
+
+# collect interactive identity on the ISO (real tty, before chroot)
+if [ -z "${HOSTNAME:-}" ]; then
+  read -rp "Hostname: " HOSTNAME
+fi
+if [ -z "${USERNAME:-}" ]; then
+  read -rp "Username (blank to skip user creation): " USERNAME
+fi
+if [ -z "${ROOT_PASSWORD:-}" ]; then
+  read -rsp "Root password: " ROOT_PASSWORD; echo
+  read -rsp "Confirm: " confirm; echo
+  [ "$ROOT_PASSWORD" = "$confirm" ] || { error "Passwords don't match."; exit 1; }
+fi
+if [ -n "${USERNAME:-}" ] && [ -z "${USER_PASSWORD:-}" ]; then
+  read -rsp "Password for ${USERNAME}: " USER_PASSWORD; echo
+  read -rsp "Confirm: " confirm; echo
+  [ "$USER_PASSWORD" = "$confirm" ] || { error "Passwords don't match."; exit 1; }
+fi
+
+# chroot: non-secret system config (unquoted heredoc expands $vars)
+info "Entering chroot to configure the installed system"
+arch-chroot /mnt /bin/bash -euo pipefail <<CHROOT
+# 3.3 Time
 if [ -n "${TIMEZONE:-}" ]; then
-  info "Setting timezone: $TIMEZONE"
-  timedatectl set-timezone "$TIMEZONE"
-else
-  info "TIMEZONE not set, skipping"
+  ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+  hwclock --systohc
+fi
+# 3.4 Localization
+if [ -n "${LOCALE:-}" ]; then
+  sed -i "s/^#\\s*\\(${LOCALE}\\)/\\1/" /etc/locale.gen
+  locale-gen
+  echo "LANG=${LOCALE}" > /etc/locale.conf
+fi
+if [ -n "${KEYMAP_WRITE:-}" ]; then
+  echo "KEYMAP=${KEYMAP_WRITE}" > /etc/vconsole.conf
+fi
+# 3.5 Network (enable only — cannot start in chroot)
+echo "${HOSTNAME}" > /etc/hostname
+systemctl enable NetworkManager
+# 3.6 Initramfs
+mkinitcpio -P
+# 3.8 Boot loader
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
+CHROOT
+
+# secrets + user: separate arch-chroot calls, no heredoc expansion
+# root password
+echo "root:${ROOT_PASSWORD}" | arch-chroot /mnt chpasswd
+
+# user creation + password + sudo
+if [ -n "${USERNAME:-}" ]; then
+  arch-chroot /mnt useradd -m -G wheel -s /bin/bash "$USERNAME"
+  echo "${USERNAME}:${USER_PASSWORD}" | arch-chroot /mnt chpasswd
+  sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /mnt/etc/sudoers
 fi
 
-
-
-
-
+# === reboot ===
+success "Base install complete."
+info "Unmount and reboot:  umount -R /mnt && reboot"
