@@ -1,0 +1,4 @@
+# Remap keys, not created by script instead installed
+
+include "/usr/share/kbd/keymaps/i386/qwerty/es.map.gz"
+keycode 58 = Escape # Caps -> Escape
