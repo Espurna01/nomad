@@ -29,9 +29,14 @@ set_key_value() { # pls don't use | as key/value
   fi
 }
 
+info "Adding KEYMAP configuration from $PERS_KEYS to $KEYMAP_DIR"
 mkdir -p "$KEYMAP_DIR"
 cp "$PERS_KEYS" "$KEYMAP_DIR"
 set_key_value KEYMAP "$KEYMAP_WRITE" /etc/vconsole.conf
+info "Restarting systemd-vconsole service for the changes to take effect"
+systemctl status systemd-vconsole-setup.service
+success "Successfully configured /etc/vconsole.conf"
+
 
 if [ ! -f /sys/firmware/efi/fw_platform_size ]; then
   error "Bootmode legacy BIOS or CSM, not UEFI. Exiting..."
