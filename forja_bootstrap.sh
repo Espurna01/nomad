@@ -95,7 +95,7 @@ fi
 info "Layout: efi=${BOOT_GB}, swap=${SWAP_GB}, root=remainder"
 
 error "CAREFUL! following will erase everything on selected disk: '$DISK'"
-lsblk "$DISK"
+lsblk lsblk -dno NAME,SIZE,TYPE,TRAN,MODEL "$DISK"
 read -rp "Type the disk path '$DISK' to confirm: " confirm
 if [ "$confirm" != "$DISK" ]; then
    error "Confirmation mismatch. Aborting."
