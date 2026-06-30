@@ -34,7 +34,7 @@ mkdir -p "$KEYMAP_DIR"
 cp "$PERS_KEYS" "$KEYMAP_DIR"
 set_key_value KEYMAP "$KEYMAP_WRITE" /etc/vconsole.conf
 info "Restarting systemd-vconsole service for the changes to take effect"
-systemctl status systemd-vconsole-setup.service
+systemctl restart systemd-vconsole-setup.service
 success "Successfully configured /etc/vconsole.conf"
 
 
