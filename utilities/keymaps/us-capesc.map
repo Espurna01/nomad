@@ -1,6 +1,6 @@
 # us-capesc.map
 # Base US console keymap with personal Caps Lock <-> Escape swap
-include "us"
+include "/usr/share/kbd/keymaps/i386/qwerty/us.map.gz"
 
 keycode  1   =  Caps_Lock
 keycode  58  =  Escape
