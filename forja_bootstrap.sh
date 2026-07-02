@@ -6,9 +6,7 @@
 #   - uefi system
 set -euo pipefail
 
-info()  { printf "\033[1;34m[INFO]\033[0m %s\n" "$*"; }
-error() { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*"; }
-success() { printf "\033[1;32m[SUCCESS]\033[0m %s\n" "$*"; }
+source helpers.sh
 
 # verify bootmode
 if [ ! -f /sys/firmware/efi/fw_platform_size ]; then
@@ -18,23 +16,7 @@ fi
 
 info "UEFI bootmode: $(cat /sys/firmware/efi/fw_platform_size)-bit"
 
-# enforce use of .env
-if [ ! -f .env ]; then
-  error ".env not found in working direcotry. Copy template_.env to .env and set your values." >&2
-  exit 2
-fi
-source .env
-
-# idempotent set key value on configuration file
-set_key_value() { # pls don't use | as key/value
-  local key="$1" value="$2" file="$3"
-  local line="${key}=${value}"
-  if grep -q "^\s*${key}\s*=" "$file" 2>/dev/null; then
-    sed -i "s|^\s*${key}\s*=.*|${line}|" "$file"
-  else
-    echo "${line}" >> "$file"
-  fi
-}
+enforce_env
 
 # 1.8 update system clock
 info "Enabling NTP time sync"

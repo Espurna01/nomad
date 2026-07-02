@@ -1,0 +1,6 @@
+# us-capesc.map
+# Base US console keymap with personal Caps Lock <-> Escape swap
+include "us"
+
+keycode  1   =  Caps_Lock
+keycode  58  =  Escape
