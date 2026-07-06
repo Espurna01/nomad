@@ -56,7 +56,20 @@ else
 fi
 
 # ============================================================
-# 2. Dotfiles (fetch + merge, then stow into ~/.config)
+# 2. Fonts (these supposed to be the same that dotfiles reference)
+# ============================================================
+if [ -n "${FONT_PACKAGES:-}" ]; then
+	info "Installing font packages: ${FONT_PACKAGES}"
+	sudo pacman -S --needed --noconfirm ${FONT_PACKAGES}
+	info "Rebuilding font cache"
+	fc-cache -f >/dev/null
+else
+	info "FONT_PACKAGES not set in .evn, skipping font install..."
+fi
+
+
+# ============================================================
+# 3. Dotfiles (fetch + merge, then stow into ~/.config)
 # ============================================================
 if [ -n "${DOTFILES_REPO:-}" ]; then
   DOTFILES_DIR="${DOTFILES_DIR:-$HOME/.dotfiles}"
@@ -105,7 +118,7 @@ else
 fi
 
 # ============================================================
-# 3. Timezone + NTP + Locale + console keymap
+# 4. Timezone + NTP + Locale + console keymap
 # ============================================================
 if [ -n "${TIMEZONE:-}" ]; then
   info "Setting timezone to ${TIMEZONE}"
@@ -167,10 +180,10 @@ if [ -d "${KEYMAP_SRC}" ]; then
 fi
 
 # ============================================================
-# 4. Graphics: GPU driver + Wayland/Sway + Bluetooth + login
+# 5. Graphics: GPU driver + Wayland/Sway + Bluetooth + login
 # ============================================================
 
-# --- 4a. GPU driver (auto-detected by vendor) ---
+# 5a. GPU driver (auto-detected by vendor) 
 if [ "${SETUP_GPU:-true}" = "true" ]; then
   gpu_line="$(lspci | grep -Ei 'vga|3d|display' || true)"
   info "Detected GPU: ${gpu_line:-none found}"
@@ -191,7 +204,7 @@ else
   info "SETUP_GPU=false, skipping GPU driver install"
 fi
 
-# --- 4b. Wayland / Sway compositor stack ---
+# 5b. Wayland / Sway compositor stack 
 if [ "${SETUP_WAYLAND:-true}" = "true" ]; then
   if [ -n "${WAYLAND_PACKAGES:-}" ]; then
     info "Installing Wayland/Sway stack: ${WAYLAND_PACKAGES}"
@@ -203,7 +216,7 @@ else
   info "SETUP_WAYLAND=false, skipping Wayland stack"
 fi
 
-# --- 4c. Bluetooth ---
+# 5c. Bluetooth 
 if [ "${SETUP_BLUETOOTH:-true}" = "true" ]; then
   info "Installing Bluetooth stack (bluez, bluez-utils) and enabling service"
   sudo pacman -S --needed --noconfirm bluez bluez-utils
@@ -212,16 +225,41 @@ else
   info "SETUP_BLUETOOTH=false, skipping Bluetooth"
 fi
 
-# --- 4d. Login manager: greetd + regreet
-# Deliberately NOT handled here. Auto-starting sway on login is shell- and
-# user-specific config and belongs in your dotfiles, not install logic.
-# For reference, the bash version (in ~/.bash_profile) is:
-#   if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-#     exec sway            # append --unsupported-gpu on NVIDIA
-#   fi
+# 5d. Login manager: greetd + regreet
+if [ "${SETUP_LOGIN:-true}" = "true" ]; then
+  GREETD_SRC="./utilities/greetd"
+  if [ ! -d "${GREETD_SRC}" ]; then
+    append_note "Login setup skipped: ${GREETD_SRC} not found."
+  else
+    info "Installing greetd + regreet login manager"
+    sudo pacman -S --needed --noconfirm greetd greetd-regreet
+ 
+    info "Installing /etc/greetd/ config from ${GREETD_SRC}"
+    sudo mkdir -p /etc/greetd
+    sudo cp "${GREETD_SRC}/config.toml"   /etc/greetd/config.toml
+    sudo cp "${GREETD_SRC}/hyprland.conf" /etc/greetd/hyprland.conf
+    sudo cp "${GREETD_SRC}/regreet.toml"  /etc/greetd/regreet.toml
+ 
+    # The `greeter` user (created by the greetd package) needs GPU/seat
+    # access to run the graphical greeter.
+    sudo usermod -aG video,input greeter 2>/dev/null || true
+ 
+    # Sanity: regreet offers sessions from /usr/share/wayland-sessions;
+    # the hyprland package should have installed hyprland.desktop there.
+    if [ ! -e /usr/share/wayland-sessions/hyprland.desktop ]; then
+      append_note "No hyprland.desktop in /usr/share/wayland-sessions — regreet may not offer a Hyprland session. Check the hyprland package installed correctly."
+    fi
+ 
+    info "Enabling greetd.service (starts the login manager at boot)"
+    sudo systemctl enable greetd.service
+ 
+    append_note "greetd enabled — next boot shows the regreet login. If it fails: Ctrl+Alt+F2 to a TTY, then 'journalctl -u greetd -b'."
+  fi
+else
+  info "SETUP_LOGIN=false, skipping login manager setup"
+fi
 
-
-# --- 4e. Default shell (optional) ---
+# 5e. Default shell (optional) 
 # zsh is installed via PACMAN_PACKAGES; make it the login shell if requested.
 if [ "${SETUP_ZSH_SHELL:-false}" = "true" ] && command -v zsh >/dev/null 2>&1; then
   if [ "${SHELL:-}" != "$(command -v zsh)" ]; then
